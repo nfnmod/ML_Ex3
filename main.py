@@ -4,10 +4,11 @@ import numpy as np
 import tensorflow
 from keras import Input, Model
 from keras.applications.vgg19 import VGG19, preprocess_input
-from keras.layers import Dense
-from keras.optimizer_v2.adam import Adam
-from keras.preprocessing.image import load_img, img_to_array
+from keras.layers import Dense, Flatten
+from keras.optimizers import Adam
 from keras.callbacks import History
+from keras.utils import load_img, img_to_array
+from keras.callbacks import EarlyStopping
 from sklearn.model_selection import train_test_split
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -19,16 +20,18 @@ SOFTMAX = "softmax"
 CAT_CROSS_EN = "categorical_crossentropy"
 ACC = "accuracy"
 TRAIN_VAL_SPLIT = 1 / 3
+NUM_CATEGORIES = 102
 
 mat = scipy.io.loadmat('./imagelabels.mat')
-print(mat)
+
+labels = mat['labels'][0]
 
 VGG = VGG19(include_top=False, classes=102)
 VGG.trainable = False
-print(VGG.summary())
 
 DENSE_UNITS = [32, 64, 128]
 BATCH_SIZES = [32, 64, 128]
+EPOCHS = [100]
 INPUT_SIZE = [224]
 
 
@@ -42,7 +45,7 @@ def preprocess(size):
         image = img_to_array(image)
 
         # reshape data for the model
-        image = image.reshape((1, image.shape[0], image.shape[1], image.shape[2]))
+        image = image.reshape((image.shape[0], image.shape[1], image.shape[2]))
 
         # prepare the image for the VGG model
         image = preprocess_input(image)
@@ -50,22 +53,6 @@ def preprocess(size):
         images.append(image)
 
     return np.array(images)
-
-
-def create_VGG_classifier(dense_units, lr=0.001):
-    inp = Input()
-
-    vgg_res = VGG(inp)
-
-    dense = Dense(dense_units, activation='relu')(vgg_res)
-
-    output = Dense(dense_units, activation='softmax')(dense)
-
-    model = Model(inp, output)
-
-    model.compile(optimizer=Adam(lr), loss=CAT_CROSS_EN, metrics=[ACC])
-
-    return model
 
 
 def train_val_split(X_train, y_train):
@@ -82,6 +69,37 @@ def train_val_split(X_train, y_train):
     label_val = np.array(y_train)[indices[:val_allocation]]
 
     return img_train, img_val, label_train, label_val
+
+
+def one_hot_encode_labels():
+    encoded_labels = []
+    for label in labels:
+        encoded_label = np.zeros(NUM_CATEGORIES)
+        encoded_label[label - 1] = 1
+        encoded_labels.append(encoded_label)
+    return encoded_labels
+
+
+def create_VGG_classifier(input_size, dense_units, lr=0.001):
+    inp = Input((input_size, input_size, 3))
+
+    vgg_res = VGG(inp)
+
+    flat = Flatten()(vgg_res)
+
+    dense = Dense(dense_units, activation='relu')(flat)
+
+    dense = Dense(dense_units, activation='relu')(dense)
+
+    output = Dense(NUM_CATEGORIES, activation='softmax')(dense)
+
+    model = Model(inp, output)
+
+    model.compile(optimizer=Adam(lr), loss=CAT_CROSS_EN, metrics=[ACC])
+
+    # print(model.summary())
+
+    return model
 
 
 def loss_acc_graphs(log, hyper_paramters):
@@ -143,17 +161,25 @@ def loss_acc_graphs(log, hyper_paramters):
 
 
 def run_VGG():
+    encoded_labels = one_hot_encode_labels()
     for input_size in INPUT_SIZE:
         images = preprocess(input_size)
-        X_train, X_test, y_train, y_test = train_test_split(images, labels, test_size=0.25)
+        X_train, X_test, y_train, y_test = train_test_split(images, encoded_labels, test_size=0.25)
 
         img_train, img_val, label_train, label_val = train_val_split(X_train, y_train)
 
-        print("train size {}, val size: {}, test size: {}")
+        print("train size {}, val size: {}, test size: {}".format(len(img_train), len(img_val), len(X_test)))
 
         for batch_size in BATCH_SIZES:
             for dense_units in DENSE_UNITS:
-                model = create_VGG_classifier(dense_units)
+                model = create_VGG_classifier(input_size, dense_units)
+                early_stopping = EarlyStopping(monitor='val_loss', patience=5, min_delta=0.001)
                 history = History()
-                history = model.fit(img_train, label_train, batch_size=batch_size, validation_data=[img_val, label_val], callbacks=[history])
+                history = model.fit(img_train, label_train, batch_size=batch_size, validation_data=[img_val, label_val], callbacks=[history, early_stopping])
                 loss_acc_graphs(history, f"{input_size}_{batch_size}_{dense_units}")
+
+
+if __name__ == '__main__':
+    run_VGG()
+
+
