@@ -31,7 +31,7 @@ VGG.trainable = False
 
 DENSE_UNITS = [32, 64, 128]
 BATCH_SIZES = [32, 64, 128]
-EPOCHS = [100]
+EPOCHS = [25, 50, 75, 100]
 INPUT_SIZE = [224]
 
 
@@ -102,7 +102,7 @@ def create_VGG_classifier(input_size, dense_units, lr=0.001):
     return model
 
 
-def loss_acc_graphs(log, hyper_paramters):
+def loss_acc_graphs(log, hyper_paramters, log2=None):
     """
     Plots the loss and accuracy graphs based on the model's log.
 
@@ -119,13 +119,13 @@ def loss_acc_graphs(log, hyper_paramters):
     fig_loss = go.Figure()
     fig_loss.add_trace(go.Scatter(
         x=list(range(1, len(log.history['loss']) + 1)),
-        y=log.history['loss'],
+        y=log.history['loss'] if log2 is None else (log.history['loss'] + log2.history['loss']) / 2,
         mode='lines',
         name='train'
     ))
     fig_loss.add_trace(go.Scatter(
         x=list(range(1, len(log.history['val_loss']) + 1)),
-        y=log.history['val_loss'],
+        y=log.history['val_loss'] if log2 is None else (log.history['val_loss'] + log2.history['val_loss']) / 2,
         mode='lines',
         name='validation'
     ))
@@ -141,13 +141,13 @@ def loss_acc_graphs(log, hyper_paramters):
     fig_acc = go.Figure()
     fig_acc.add_trace(go.Scatter(
         x=list(range(1, len(log.history['accuracy']) + 1)),
-        y=log.history['accuracy'],
+        y=log.history['accuracy'] if log2 is None else (log.history['accuracy'] + log2.history['accuracy']) / 2,
         mode='lines',
         name='train'
     ))
     fig_acc.add_trace(go.Scatter(
         x=list(range(1, len(log.history['val_accuracy']) + 1)),
-        y=log.history['val_accuracy'],
+        y=log.history['val_accuracy'] if log2 is None else (log.history['val_accuracy'] + log2.history['val_accuracy']) / 2,
         mode='lines',
         name='validation'
     ))
@@ -164,19 +164,33 @@ def run_VGG():
     encoded_labels = one_hot_encode_labels()
     for input_size in INPUT_SIZE:
         images = preprocess(input_size)
-        X_train, X_test, y_train, y_test = train_test_split(images, encoded_labels, test_size=0.25)
 
-        img_train, img_val, label_train, label_val = train_val_split(X_train, y_train)
+        X_train1, X_test1, y_train1, y_test1 = train_test_split(images, encoded_labels, test_size=0.25)
 
-        print("train size {}, val size: {}, test size: {}".format(len(img_train), len(img_val), len(X_test)))
+        img_train1, img_val1, label_train1, label_val1 = train_val_split(X_train1, y_train1)
+
+        X_train2, X_test2, y_train2, y_test2 = train_test_split(images, encoded_labels, test_size=0.25)
+
+        img_train2, img_val2, label_train2, label_val2 = train_val_split(X_train2, y_train2)
 
         for batch_size in BATCH_SIZES:
             for dense_units in DENSE_UNITS:
-                model = create_VGG_classifier(input_size, dense_units)
-                early_stopping = EarlyStopping(monitor='val_loss', patience=5, min_delta=0.001)
-                history = History()
-                history = model.fit(img_train, label_train, batch_size=batch_size, validation_data=[img_val, label_val], callbacks=[history, early_stopping])
-                loss_acc_graphs(history, f"{input_size}_{batch_size}_{dense_units}")
+                for epochs in EPOCHS:
+                    model = create_VGG_classifier(input_size, dense_units)
+
+                    history1 = History()
+                    history1 = model.fit(img_train1, label_train1, batch_size=batch_size, validation_data=[img_val1, label_val1], callbacks=[history1], epochs=epochs)
+
+                    loss_acc_graphs(history1, f"split1_{input_size}_{batch_size}_{epochs}_{dense_units}")
+
+                    model = create_VGG_classifier(input_size, dense_units)
+
+                    history2 = History()
+                    history2 = model.fit(img_train2, label_train2, batch_size=batch_size, validation_data=[img_val2, label_val2], callbacks=[history2], epochs=epochs)
+
+                    loss_acc_graphs(history2, f"split2_{input_size}_{batch_size}_{epochs}_{dense_units}")
+
+                    loss_acc_graphs(history1, f"avg_{input_size}_{batch_size}_{epochs}_{dense_units}", log2=history2)
 
 
 if __name__ == '__main__':
