@@ -1,7 +1,6 @@
 import math
 import os
 from pathlib import Path
-import tensorflow as tf
 import cv2
 import keras
 import numpy as np
@@ -257,15 +256,43 @@ def create_labeled_data():
         img_id += 1
 
 
+"""imgs = []
 size = 640
 image_path = "./jpg/image_00001.jpg"
 image = Image.open(image_path).resize((size, size))
 transform = transforms.ToTensor()
 image_tensor = transform(image).unsqueeze(0)
+imgs.append(image_tensor)
+
+image_path = "./jpg/image_00002.jpg"
+image = Image.open(image_path).resize((size, size))
+transform = transforms.ToTensor()
+image_tensor = transform(image).unsqueeze(0)
+imgs.append(image_tensor)"""
+
+
+size =640
+transform = transforms.Compose([
+    transforms.Resize((size, size)),
+    transforms.ToTensor()
+])
+
+
+image_paths = ["./jpg/image_00002.jpg",  "./jpg/image_00001.jpg"]
+
+image_tensors = []
+for image_path in image_paths:
+    image = Image.open(image_path)
+    image_tensor = transform(image)
+    image_tensors.append(image_tensor)
+
+# Convert the list of image tensors into a single tensor
+batch_size = len(image_tensors)
+image_tensor = torch.stack(image_tensors, dim=0)
 
 model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True, autoshape=False, classes=102)
 model.model = model.model[:10]
-print(model.model)
+
 with torch.no_grad():
     output = model(image_tensor)
-    print(output.shape)
+    print(output.numpy().shape)
