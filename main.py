@@ -1,17 +1,24 @@
+import math
 import os
-import scipy.io
+from pathlib import Path
+import tensorflow as tf
+import cv2
+import keras
 import numpy as np
-import tensorflow
-from keras import Input, Model
-from keras.applications.vgg19 import VGG19, preprocess_input
-from keras.layers import Dense, Flatten
-from keras.optimizers import Adam
-from keras.callbacks import History
-from keras.utils import load_img, img_to_array
-from keras.callbacks import EarlyStopping
-from sklearn.model_selection import train_test_split
+import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
+import scipy.io
+import torch
+import torchvision.transforms as transforms
+from PIL import Image
+from keras import Input, Model
+from keras.applications.vgg19 import VGG19, preprocess_input
+from keras.callbacks import History
+from keras.layers import Dense, Flatten
+from keras.optimizers import Adam
+from keras.utils import load_img, img_to_array
+from sklearn.model_selection import train_test_split
 
 IMAGES_PATH = "./jpg/"
 PATH_GRAPHS = "./graphs"
@@ -32,7 +39,7 @@ VGG.trainable = False
 DENSE_UNITS = [32, 64, 128]
 BATCH_SIZES = [32, 64, 128]
 EPOCHS = [25, 50, 75, 100]
-INPUT_SIZE = [224]
+INPUT_SIZE = [112]
 
 
 def preprocess(size):
@@ -97,8 +104,6 @@ def create_VGG_classifier(input_size, dense_units, lr=0.001):
 
     model.compile(optimizer=Adam(lr), loss=CAT_CROSS_EN, metrics=[ACC])
 
-    # print(model.summary())
-
     return model
 
 
@@ -119,13 +124,14 @@ def loss_acc_graphs(log, hyper_paramters, log2=None):
     fig_loss = go.Figure()
     fig_loss.add_trace(go.Scatter(
         x=list(range(1, len(log.history['loss']) + 1)),
-        y=log.history['loss'] if log2 is None else (log.history['loss'] + log2.history['loss']) / 2,
+        y=log.history['loss'] if log2 is None else (np.array(log.history['loss']) + np.array(log2.history['loss'])) / 2,
         mode='lines',
         name='train'
     ))
     fig_loss.add_trace(go.Scatter(
         x=list(range(1, len(log.history['val_loss']) + 1)),
-        y=log.history['val_loss'] if log2 is None else (log.history['val_loss'] + log2.history['val_loss']) / 2,
+        y=log.history['val_loss'] if log2 is None else (np.array(log.history['val_loss']) + np.array(
+            log2.history['val_loss'])) / 2,
         mode='lines',
         name='validation'
     ))
@@ -141,13 +147,15 @@ def loss_acc_graphs(log, hyper_paramters, log2=None):
     fig_acc = go.Figure()
     fig_acc.add_trace(go.Scatter(
         x=list(range(1, len(log.history['accuracy']) + 1)),
-        y=log.history['accuracy'] if log2 is None else (log.history['accuracy'] + log2.history['accuracy']) / 2,
+        y=log.history['accuracy'] if log2 is None else (np.array(log.history['accuracy']) + np.array(
+            log2.history['accuracy'])) / 2,
         mode='lines',
         name='train'
     ))
     fig_acc.add_trace(go.Scatter(
         x=list(range(1, len(log.history['val_accuracy']) + 1)),
-        y=log.history['val_accuracy'] if log2 is None else (log.history['val_accuracy'] + log2.history['val_accuracy']) / 2,
+        y=log.history['val_accuracy'] if log2 is None else (np.array(log.history['val_accuracy']) + np.array(
+            log2.history['val_accuracy'])) / 2,
         mode='lines',
         name='validation'
     ))
@@ -161,6 +169,10 @@ def loss_acc_graphs(log, hyper_paramters, log2=None):
 
 
 def run_VGG():
+    results = pd.DataFrame(columns=["input size", "batch size", "epochs", "dense units",
+                                    "train loss 1", "train loss 2", "train acc 1", "train acc 2",
+                                    "val loss 1", "val loss 2", "val acc 1", "val acc 2",
+                                    "test loss 1", "test loss 2", "test acc 1", "test acc 2"])
     encoded_labels = one_hot_encode_labels()
     for input_size in INPUT_SIZE:
         images = preprocess(input_size)
@@ -173,27 +185,87 @@ def run_VGG():
 
         img_train2, img_val2, label_train2, label_val2 = train_val_split(X_train2, y_train2)
 
+        X_test1, X_test2, y_test1, y_test2 = np.array(X_test1), np.array(X_test2), np.array(y_test1), np.array(y_test2)
+
         for batch_size in BATCH_SIZES:
             for dense_units in DENSE_UNITS:
                 for epochs in EPOCHS:
+                    result = dict()
+                    result["input size"] = input_size
+                    result["batch size"] = batch_size
+                    result["epochs"] = epochs
+                    result["dense units"] = dense_units
+
                     model = create_VGG_classifier(input_size, dense_units)
 
                     history1 = History()
-                    history1 = model.fit(img_train1, label_train1, batch_size=batch_size, validation_data=[img_val1, label_val1], callbacks=[history1], epochs=epochs)
+                    history1 = model.fit(img_train1, label_train1, batch_size=batch_size,
+                                         validation_data=[img_val1, label_val1], callbacks=[history1], epochs=epochs)
+
+                    test_loss1, test_acc1 = model.evaluate(X_test1, y_test1)
+
+                    result["train loss 1"] = history1.history['loss']
+                    result["train acc 1"] = history1.history['accuracy']
+                    result["val loss 1"] = history1.history['val_loss']
+                    result["val acc 1"] = history1.history['val_accuracy']
+                    result["test loss 1"] = test_loss1
+                    result["test acc 1"] = test_acc1
 
                     loss_acc_graphs(history1, f"split1_{input_size}_{batch_size}_{epochs}_{dense_units}")
 
                     model = create_VGG_classifier(input_size, dense_units)
 
                     history2 = History()
-                    history2 = model.fit(img_train2, label_train2, batch_size=batch_size, validation_data=[img_val2, label_val2], callbacks=[history2], epochs=epochs)
+                    history2 = model.fit(img_train2, label_train2, batch_size=batch_size,
+                                         validation_data=[img_val2, label_val2], callbacks=[history2], epochs=epochs)
+
+                    test_loss2, test_acc2 = model.evaluate(X_test2, y_test2)
+
+                    result["train loss 2"] = history2.history['loss']
+                    result["train acc 2"] = history2.history['accuracy']
+                    result["val loss 2"] = history2.history['val_loss']
+                    result["val acc 2"] = history2.history['val_accuracy']
+                    result["test loss 2"] = test_loss2
+                    result["test acc 2"] = test_acc2
 
                     loss_acc_graphs(history2, f"split2_{input_size}_{batch_size}_{epochs}_{dense_units}")
 
                     loss_acc_graphs(history1, f"avg_{input_size}_{batch_size}_{epochs}_{dense_units}", log2=history2)
 
+                    result_df = pd.DataFrame.from_dict(columns=results.columns, data={'0': result}, orient='index')
+                    results = pd.concat([results, result_df], axis=0, ignore_index=True)
 
-if __name__ == '__main__':
-    run_VGG()
+    results.to_csv('./results')
 
 
+def create_labeled_data():
+    img_id = 1
+    for l in mat['labels'][0]:
+        num_zeroes = math.ceil(4 - math.log10(img_id))
+        path = './jpg/image_' + '0' * num_zeroes + '{}.jpg'.format(img_id)
+
+        img = cv2.imread(path)
+
+        dir_p = './labeled/label_' + str(l)
+        filename = dir_p + '/image_' + '0' * num_zeroes + '{}.jpg'.format(img_id)
+
+        if not os.path.exists(dir_p):
+            Path(dir_p).mkdir(exist_ok=True, parents=True)
+
+        cv2.imwrite(filename, img)
+
+        img_id += 1
+
+
+size = 640
+image_path = "./jpg/image_00001.jpg"
+image = Image.open(image_path).resize((size, size))
+transform = transforms.ToTensor()
+image_tensor = transform(image).unsqueeze(0)
+
+model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True, autoshape=False, classes=102)
+model.model = model.model[:10]
+print(model.model)
+with torch.no_grad():
+    output = model(image_tensor)
+    print(output.shape)
