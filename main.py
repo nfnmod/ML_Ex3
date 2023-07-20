@@ -271,7 +271,7 @@ image_tensor = transform(image).unsqueeze(0)
 imgs.append(image_tensor)"""
 
 
-size =640
+size = 320
 transform = transforms.Compose([
     transforms.Resize((size, size)),
     transforms.ToTensor()
@@ -284,11 +284,13 @@ image_tensors = []
 for image_path in image_paths:
     image = Image.open(image_path)
     image_tensor = transform(image)
+    print(image_tensor.shape)
     image_tensors.append(image_tensor)
 
 # Convert the list of image tensors into a single tensor
 batch_size = len(image_tensors)
 image_tensor = torch.stack(image_tensors, dim=0)
+print(type(image_tensor) ,image_tensor.shape)
 
 model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True, autoshape=False, classes=102)
 model.model = model.model[:10]
